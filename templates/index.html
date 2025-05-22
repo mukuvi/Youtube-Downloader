@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-100 flex flex-col items-center p-6 min-h-screen">
+    <h1 class="text-3xl font-bold mb-6">YouTube Downloader</h1>
+
+    <form
+      id="downloadForm"
+      class="flex flex-col items-center gap-4 w-full max-w-md bg-white p-6 rounded shadow"
+    >
+      <input
+        type="text"
+        name="url"
+        placeholder="Paste YouTube URL here"
+        class="w-full border rounded p-2"
+        required
+      />
+      <select name="format" class="w-full border rounded p-2">
+        <option value="audio">Audio (MP3)</option>
+        <option value="video">Video (MP4)</option>
+      </select>
+      <button
+        type="submit"
+        class="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition"
+      >
+        Start Download
+      </button>
+    </form>
+
+    <div class="w-full max-w-md mt-6">
+      <div class="h-6 bg-gray-300 rounded overflow-hidden">
+        <div id="progressBar" class="h-6 bg-green-500 w-0"></div>
+      </div>
+      <pre
+        id="progressText"
+        class="mt-2 text-sm font-mono text-gray-700 min-h-[3rem]"
+      ></pre>
+    </div>
+
+    <footer class="mt-auto pt-4 text-gray-600">
+      Made with ❤️ by
+      <a href="https://mukuvi.me" target="_blank" class="underline"
+        >mukuvi.me</a
+      >
+    </footer>
+
+    <script>
+      const form = document.getElementById("downloadForm");
+      const progressBar = document.getElementById("progressBar");
+      const progressText = document.getElementById("progressText");
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        progressBar.style.width = "0%";
+        progressText.textContent = "";
+
+        const formData = new FormData(form);
+
+        // Start download by sending POST (not SSE)
+        const resp = await fetch("/start_download", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!resp.ok) {
+          progressText.textContent = `Error starting download: ${await resp.text()}`;
+          return;
+        }
+
+        // Now open EventSource GET to /progress for live updates
+        const urlParams = new URLSearchParams(formData);
+        const evtSource = new EventSource(`/progress?${urlParams.toString()}`);
+
+        evtSource.onmessage = (event) => {
+          const data = event.data;
+
+          if (data.startsWith("DOWNLOAD_COMPLETE::")) {
+            const filename = data.split("::")[1];
+            progressText.textContent += `\nDownload complete! File: ${filename}`;
+            progressBar.style.width = "100%";
+            evtSource.close();
+
+            const link = document.createElement("a");
+            link.href = `/downloads/${filename}`;
+            link.download = filename;
+            link.textContent = "Click here to download";
+            progressText.appendChild(document.createElement("br"));
+            progressText.appendChild(link);
+          } else if (data.startsWith("ERROR::")) {
+            progressText.textContent += `\nError: ${data.split("::")[1]}`;
+            evtSource.close();
+          } else {
+            progressText.textContent = data;
+
+            const match = data.match(/(\d{1,3}\.\d)%/);
+            if (match) {
+              const percent = parseFloat(match[1]);
+              progressBar.style.width = percent + "%";
+            }
+          }
+        };
+
+        evtSource.onerror = () => {
+          progressText.textContent += "\nConnection lost or error occurred.";
+          evtSource.close();
+        };
+      });
+    </script>
+  </body>
+</html>
